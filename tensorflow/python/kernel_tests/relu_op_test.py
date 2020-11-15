@@ -91,7 +91,7 @@ class ReluTest(test.TestCase):
       self.skipTest("No GPU available")
     inputs = constant_op.constant(
         np.array([[-50, 7, 23], [0, 1, -5], [6, -2, 11]]), dtypes.qint8)
-    with self.assertRaisesRegexp(
+    with self.assertRaisesRegex(
         errors.InvalidArgumentError,
         "Tensor size must be a multiple of 4 for Relu<qint8>. Got 9"):
       self.evaluate(nn_ops.relu(inputs))
@@ -99,7 +99,7 @@ class ReluTest(test.TestCase):
     inputs = constant_op.constant(
         np.array([1, -2, 3, -4, 5, -6, 7, -8, 9, -8, 7, -6, 5, -4, 3, -2, 1]),
         dtypes.qint8)
-    with self.assertRaisesRegexp(
+    with self.assertRaisesRegex(
         errors.InvalidArgumentError,
         "Tensor size must be a multiple of 4 for Relu<qint8>. Got 17"):
       self.evaluate(nn_ops.relu(inputs))
@@ -115,8 +115,8 @@ class ReluTest(test.TestCase):
           [[-0.9, -0.7, -0.5, -0.3, -0.1], [0.1, 0.3, 0.5, 0.7, 0.9]],
           dtype=np.float32,
           order="F")
-      err = gradient_checker_v2.max_error(
-          *gradient_checker_v2.compute_gradient(nn_ops.relu, [x]))
+      err = gradient_checker_v2.max_error(*gradient_checker_v2.compute_gradient(
+          nn_ops.relu, [x], delta=1.0 / 1024))
     self.assertLess(err, 1e-4)
 
   # The gradient for fp16 is inaccurate due to the low-precision.
@@ -163,8 +163,8 @@ class ReluTest(test.TestCase):
           [[-0.9, -0.7, -0.5, -0.3, -0.1], [0.1, 0.3, 0.5, 0.7, 0.9]],
           dtype=np.float64,
           order="F")
-      err = gradient_checker_v2.max_error(
-          *gradient_checker_v2.compute_gradient(nn_ops.relu, [x]))
+      err = gradient_checker_v2.max_error(*gradient_checker_v2.compute_gradient(
+          nn_ops.relu, [x], delta=1.0 / 1024))
     self.assertLess(err, 1e-10)
 
   def testGradGradFloat32(self):
@@ -182,7 +182,7 @@ class ReluTest(test.TestCase):
           dtype=np.float32,
           order="F")
       err = gradient_checker_v2.max_error(
-          *gradient_checker_v2.compute_gradient(f, [x]))
+          *gradient_checker_v2.compute_gradient(f, [x], delta=1.0 / 1024))
     self.assertLess(err, 1e-4)
 
   def testGradGradFloat64(self):
@@ -200,7 +200,7 @@ class ReluTest(test.TestCase):
           dtype=np.float64,
           order="F")
       err = gradient_checker_v2.max_error(
-          *gradient_checker_v2.compute_gradient(f, [x]))
+          *gradient_checker_v2.compute_gradient(f, [x], delta=1.0 / 1024))
     self.assertLess(err, 1e-10)
 
   def testGradientScalar(self):
@@ -544,8 +544,8 @@ class SeluTest(test.TestCase):
     with self.cached_session():
       x_val = [[-0.9, -0.7, -0.5, -0.3, -0.1], [0.1, 0.3, 0.5, 0.7, 0.9]]
       x = np.asarray(x_val, dtype=np.float32, order="F")
-      err = gradient_checker_v2.max_error(
-          *gradient_checker_v2.compute_gradient(nn_ops.selu, [x]))
+      err = gradient_checker_v2.max_error(*gradient_checker_v2.compute_gradient(
+          nn_ops.selu, [x], delta=1.0 / 1024))
     self.assertLess(err, 1e-4)
 
   def testGradientFloat64(self):
@@ -571,7 +571,7 @@ class SeluTest(test.TestCase):
           dtype=np.float32,
           order="F")
       err = gradient_checker_v2.max_error(
-          *gradient_checker_v2.compute_gradient(f, [x]))
+          *gradient_checker_v2.compute_gradient(f, [x], delta=1.0 / 1024))
     self.assertLess(err, 1e-4)
 
   def testGradGradFloat64(self):

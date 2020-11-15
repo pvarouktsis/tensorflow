@@ -20,7 +20,7 @@ load(
     "tf_cc_test",
     "tf_copts",
 )
-load("//tensorflow:tensorflow.bzl", "tfcompile_extra_flags")
+load("//tensorflow:tensorflow.bzl", "tfcompile_target_cpu")
 
 def tf_library(
         name,
@@ -127,7 +127,7 @@ def tf_library(
                    "$(location " + tfcompile_tool + ")" +
                    " --config=$(location " + config + ")" +
                    " --dump_fetch_nodes > $@"),
-            tools = [tfcompile_tool],
+            exec_tools = [tfcompile_tool],
             # Run tfcompile on the build host, rather than forge, since it's
             # typically way faster on the local machine.
             local = 1,
@@ -162,7 +162,7 @@ def tf_library(
                 "//tensorflow/python/tools:freeze_graph)" +
                 freeze_args
             ),
-            tools = ["//tensorflow/python/tools:freeze_graph"],
+            exec_tools = ["//tensorflow/python/tools:freeze_graph"],
             tags = tags,
         )
         tfcompile_graph = freeze_file
@@ -188,7 +188,9 @@ def tf_library(
     # `find` on such an object.
     need_xla_data_proto = flags and flags.find("--gen_program_shape") != -1
 
-    flags = tfcompile_extra_flags() + flags
+    target_cpu = tfcompile_target_cpu()
+    extra_flags = "--target_cpu=" + target_cpu + " " if target_cpu else " "
+    flags = extra_flags + flags
 
     if enable_xla_hlo_profiling:
         profiling_flag = "--xla_hlo_profile"
@@ -208,14 +210,14 @@ def tf_library(
         srcs.append(debug_info)
         debug_info_flag = " --debug_info=$(location " + debug_info + ")"
 
-    default_fast_math_xla_flags = "XLA_FLAGS=\"\
-      --xla_cpu_enable_fast_math=true \
-      --xla_cpu_fast_math_honor_nans=false \
-      --xla_cpu_fast_math_honor_infs=false \
-      --xla_cpu_fast_math_honor_functions=false \
-      --xla_cpu_fast_math_honor_division=false \
-      --xla_cpu_enable_fast_min_max=true \
-      $${XLA_FLAGS:-}\" "
+    default_fast_math_xla_flags = ("XLA_FLAGS='" +
+                                   "--xla_cpu_enable_fast_math=true " +
+                                   "--xla_cpu_fast_math_honor_nans=false " +
+                                   "--xla_cpu_fast_math_honor_infs=false " +
+                                   "--xla_cpu_fast_math_honor_functions=false " +
+                                   "--xla_cpu_fast_math_honor_division=false " +
+                                   "--xla_cpu_enable_fast_min_max=true " +
+                                   "$${XLA_FLAGS:-}' ")
 
     native.genrule(
         name = ("gen_" + name),
@@ -240,7 +242,7 @@ def tf_library(
             " --out_function_object=$(@D)/" + function_object_file +
             " " + flags + " " + profiling_flag + " " + mlir_flag + " " + traceme_flag
         ),
-        tools = [tfcompile_tool],
+        exec_tools = [tfcompile_tool],
         visibility = visibility,
         testonly = testonly,
         # Run tfcompile on the build host since it's typically faster on the
@@ -279,7 +281,7 @@ def tf_library(
             " --out_session_module=$(@D)/" + session_module_pb +
             " " + flags
         ),
-        tools = [tfcompile_tool],
+        exec_tools = [tfcompile_tool],
         visibility = visibility,
         testonly = testonly,
         local = 1,
@@ -432,5 +434,6 @@ def target_llvm_triple():
         "//tensorflow:linux_ppc64le": "ppc64le-ibm-linux-gnu",
         "//tensorflow:macos": "x86_64-none-darwin",
         "//tensorflow:windows": "x86_64-none-windows",
+        "//tensorflow:linux_s390x": "systemz-none-linux-gnu",
         "//conditions:default": "x86_64-pc-linux",
     })

@@ -18,7 +18,6 @@ limitations under the License.
 
 #include "tensorflow/lite/delegates/gpu/cl/cl_kernel.h"
 #include "tensorflow/lite/delegates/gpu/cl/kernels/gpu_operation.h"
-#include "tensorflow/lite/delegates/gpu/cl/precision.h"
 #include "tensorflow/lite/delegates/gpu/cl/tensor.h"
 #include "tensorflow/lite/delegates/gpu/common/types.h"
 
@@ -29,10 +28,16 @@ namespace cl {
 class Mean : public GPUOperation {
  public:
   Mean() = default;
-  explicit Mean(const OperationDef& definition) : GPUOperation(definition) {}
-  absl::Status AddToQueue(CLCommandQueue* queue) override;
+  Mean(const OperationDef& definition, const GpuInfo& gpu_info);
 
-  absl::Status Compile(const CreationContext& creation_context) override;
+  void GetPossibleKernelWorkGroups(
+      TuningType tuning_type, const GpuInfo& gpu_info,
+      const KernelInfo& kernel_info,
+      std::vector<int3>* work_groups) const override {
+    work_groups->push_back(work_group_size_);
+  }
+  absl::Status BindArguments(ArgumentsBinder* args) override;
+  int3 GetGridSize() const override;
 
   // Move only
   Mean(Mean&& operation);
@@ -41,16 +46,11 @@ class Mean : public GPUOperation {
   Mean& operator=(const Mean&) = delete;
 
  private:
-  absl::Status BindArguments();
-  int3 GetGridSize() const;
-  CLKernel kernel_;
-
-  // must be: (x * y) % 4 = 0;
-  // must be: z = 1;
-  int3 work_group_size_ = int3(16, 16, 1);
+  std::string GetMeanKernelCode(const OperationDef& op_def,
+                                const int3& work_group_size);
 };
 
-Mean CreateMean(const OperationDef& definition);
+Mean CreateMean(const OperationDef& definition, const GpuInfo& gpu_info);
 
 }  // namespace cl
 }  // namespace gpu
