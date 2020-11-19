@@ -176,9 +176,10 @@ StatusOr<BufferAllocation::Slice> GetAllocationSliceForMlir(
                                    size);
   }
 
-  // We match two patterns here:
-  // * v = ViewOp(arg);
-  // * v = MemRefReinterpretCastOp(ViewOp(arg));
+  // We match the following patterns here:
+  //  base := ViewOp(arg) | get_global_memref (global_memref)
+  //  root := base | MemRefReinterpretCastOp(base)
+
   if (mlir::Operation* op = v.getDefiningOp()) {
     if (auto cast = mlir::dyn_cast<mlir::MemRefReinterpretCastOp>(op)) {
       mlir::Value source = cast.getViewSource();
@@ -197,6 +198,14 @@ StatusOr<BufferAllocation::Slice> GetAllocationSliceForMlir(
               .getValue()
               .getSExtValue(),
           size);
+    } else if (mlir::isa<mlir::GetGlobalMemrefOp>(op)) {
+      int64_t index =
+          op->getAttrOfType<mlir::IntegerAttr>("lmhlo.alloc").getInt();
+      int64_t offset =
+          op->getAttrOfType<mlir::IntegerAttr>("lmhlo.slice_offset").getInt();
+      int64_t size =
+          op->getAttrOfType<mlir::IntegerAttr>("lmhlo.slice_size").getInt();
+      return BufferAllocation::Slice(&allocations[index], offset, size);
     }
     return Unimplemented("MemRefReinterpretCastOp has to wrap a ViewOp");
   }
@@ -578,12 +587,6 @@ Status IrEmitterUnnested::DefaultActionForMlir(MlirEmitterInput input) {
       input, output_shape,
       ComputeMaxUnrollFactor(output_shape, hlo_module_config_));
   return ret;
-}
-
-Status IrEmitterUnnested::HandleDot(HloInstruction* dot) {
-  AddThunkToThunkSequence(
-      BuildKernelThunk(dot, /*implements_whole_instruction=*/true));
-  return IrEmitter::HandleDot(dot);
 }
 
 Status IrEmitterUnnested::HandleConditional(HloInstruction* conditional) {
@@ -4381,7 +4384,7 @@ ReductionCodegenInfo IrEmitterUnnested::ComputeReductionCodegenInfo(
           unnested_hlo->IsMultiOutputFusion()
               ? unnested_hlo->fused_expression_root()->operand_count()
               : 1;
-      int64 max_block_size = std::max(16LL, 512LL / NearestPowerOfTwo(fan_out));
+      int64 max_block_size = std::max(64LL, 512LL / NearestPowerOfTwo(fan_out));
       return std::min(
           max_block_size,
           RoundUpToNearest(CeilOfRatio(reduction_dimensions.dimensions[2],

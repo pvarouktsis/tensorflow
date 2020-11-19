@@ -3311,7 +3311,7 @@ class ConvertStridedSliceOp : public OpRewritePattern<TF::StridedSliceOp> {
       auto input_val = GetScalarConstOfType(begin_element_ty, loc,
                                             input_shape[d], &rewriter);
       auto wrapped_index =
-          rewriter.create<TF::AddOp>(loc, input_val, reshaped_index);
+          rewriter.create<TF::AddV2Op>(loc, input_val, reshaped_index);
       auto final_index = rewriter.create<SelectOp>(
           loc, type, index_negative, wrapped_index, reshaped_index);
       slice_begin_indices.push_back(final_index);
@@ -5125,7 +5125,7 @@ class ConvertRandomShuffleOp : public OpRewritePattern<TF::RandomShuffleOp> {
     SmallVector<int64_t, 4> slice_sizes(input_shape.begin(), input_shape.end());
     slice_sizes[0] = 1;
     auto dims_attr = GatherDimensionNumbers::get(
-        /*offset_dims=*/GetI64ElementsAttrForSeq(1, first_dim_size, &rewriter),
+        /*offset_dims=*/GetI64ElementsAttrForSeq(1, input_rank, &rewriter),
         /*collapsed_slice_dims=*/GetI64ElementsAttr({0}, &rewriter),
         /*start_index_map=*/GetI64ElementsAttr({0}, &rewriter),
         /*index_vector_dim=*/rewriter.getI64IntegerAttr(1),
