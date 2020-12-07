@@ -183,7 +183,7 @@ objc_library(
         "//tensorflow/lite/delegates/gpu/common:types",
         "//tensorflow/lite/delegates/gpu/common:util",
         "//tensorflow/lite/delegates/gpu/common/task:arguments",
-        "//tensorflow/lite/delegates/gpu/metal:runtime_options",
+        "//tensorflow/lite/delegates/gpu/common/task:gpu_operation",
         "@FP16",
     ],
 )
@@ -208,6 +208,7 @@ objc_library(
     copts = DEFAULT_COPTS,
     sdk_frameworks = ["Metal"],
     deps = [
+        ":compiled_model",
         ":compute_task",
         ":compute_task_descriptor",
         ":runtime_options",

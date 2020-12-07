@@ -38,30 +38,41 @@ config_setting(
 )
 
 filegroup(
-    name = "unary_kernel_srcs",
-    srcs = if_mlir_unranked_kernels_enabled(
-        if_false = [
-            "cwise_op_gpu_abs.cc",
-            "cwise_op_gpu_base.cc",
-            "cwise_op_gpu_base.h",
-            "cwise_op_gpu_tanh.cc",
-        ],
-        if_true = [
-            "unranked_op_gpu_abs.cc",
-            "unranked_op_gpu_ceil.cc",
-            "unranked_op_gpu_cos.cc",
-            "unranked_op_gpu_exp.cc",
-            "unranked_op_gpu_floor.cc",
-            "unranked_op_gpu_imag.cc",
-            "unranked_op_gpu_log.cc",
-            "unranked_op_gpu_logical_not.cc",
-            "unranked_op_gpu_real.cc",
-            "unranked_op_gpu_rsqrt.cc",
-            "unranked_op_gpu_sign.cc",
-            "unranked_op_gpu_sin.cc",
-            "unranked_op_gpu_sqrt.cc",
-            "unranked_op_gpu_tanh.cc",
-        ],
+    name = "enabled_unary_unranked_kernel_srcs",
+    srcs = [
+        "unranked_op_gpu_abs.cc",
+        "unranked_op_gpu_tanh.cc",
+    ],
+    compatible_with = get_compatible_with_cloud(),
+)
+
+filegroup(
+    name = "experimental_unary_unranked_kernel_srcs",
+    srcs = [
+        "unranked_op_gpu_ceil.cc",
+        "unranked_op_gpu_conj.cc",
+        "unranked_op_gpu_cos.cc",
+        "unranked_op_gpu_exp.cc",
+        "unranked_op_gpu_floor.cc",
+        "unranked_op_gpu_imag.cc",
+        "unranked_op_gpu_is_inf.cc",
+        "unranked_op_gpu_log.cc",
+        "unranked_op_gpu_logical_not.cc",
+        "unranked_op_gpu_real.cc",
+        "unranked_op_gpu_rsqrt.cc",
+        "unranked_op_gpu_sign.cc",
+        "unranked_op_gpu_sin.cc",
+        "unranked_op_gpu_sqrt.cc",
+    ],
+    compatible_with = get_compatible_with_cloud(),
+)
+
+filegroup(
+    name = "unary_unranked_kernel_srcs",
+    srcs = [
+        ":enabled_unary_unranked_kernel_srcs",
+    ] + if_mlir_unranked_kernels_enabled(
+        if_true = [":experimental_unary_unranked_kernel_srcs"],
     ),
     compatible_with = get_compatible_with_cloud(),
 )
@@ -85,41 +96,35 @@ cc_library(
 
 tf_kernel_library(
     name = "cwise_unary_op",
-    srcs = [":unary_kernel_srcs"],
+    srcs = [":unary_unranked_kernel_srcs"],
     tags = [
         "manual",
     ],
-    deps = if_mlir_unranked_kernels_enabled(
-        if_false = [
-            ":abs_kernels",
-            ":tanh_kernels",
-            "@com_google_absl//absl/strings",
-            "@com_google_absl//absl/synchronization",
-            "@com_google_absl//absl/types:span",
-            "//third_party/eigen3",
-            "//tensorflow/core:framework",
-            "//tensorflow/core:lib",
-            "//tensorflow/core/platform:stream_executor",
-        ],
-        if_true = [
-            ":abs_unranked_kernels",
-            ":ceil_unranked_kernels",
-            ":cos_unranked_kernels",
-            ":exp_unranked_kernels",
-            ":floor_unranked_kernels",
-            ":imag_unranked_kernels",
-            ":log_unranked_kernels",
-            ":logical_not_unranked_kernels",
-            ":real_unranked_kernels",
-            ":rsqrt_unranked_kernels",
-            ":sign_unranked_kernels",
-            ":sin_unranked_kernels",
-            ":sqrt_unranked_kernels",
-            ":tanh_unranked_kernels",
-            ":unranked_op_gpu_base",
-            "//third_party/eigen3",
-        ],
-    ),
+    deps = [
+        # Technically we only need to depend on the kernel libraries for the
+        # unranked kernels which are enabled by default. But this would
+        # make our BUILD target structure uglier. We already need to make
+        # sure that those targets can be built, so it should not hurt to
+        # link them in even if they are currently not needed yet.
+        ":abs_unranked_kernels",
+        ":ceil_unranked_kernels",
+        ":conj_unranked_kernels",
+        ":cos_unranked_kernels",
+        ":exp_unranked_kernels",
+        ":floor_unranked_kernels",
+        ":imag_unranked_kernels",
+        ":is_inf_unranked_kernels",
+        ":log_unranked_kernels",
+        ":logical_not_unranked_kernels",
+        ":real_unranked_kernels",
+        ":rsqrt_unranked_kernels",
+        ":sign_unranked_kernels",
+        ":sin_unranked_kernels",
+        ":sqrt_unranked_kernels",
+        ":tanh_unranked_kernels",
+        ":unranked_op_gpu_base",
+        "//third_party/eigen3",
+    ],
 )
 
 tf_kernel_library(
@@ -170,6 +175,7 @@ tf_cuda_cc_test(
         "//tensorflow/core/common_runtime:device_factory",
         "//tensorflow/core/kernels:cwise_op",
         "//tensorflow/core/kernels:ops_testutil",
+        "@com_google_absl//absl/container:inlined_vector",
     ],
 )
 
@@ -232,10 +238,11 @@ gen_kernel_library(
 
 gen_kernel_library(
     name = "conj",
+    generate_unranked = True,
     tile_size = "256",
     types = [
-        "c64",
-        "c128",
+        "f32",
+        "f64",
     ],
     unroll_factors = "4",
 )
@@ -248,7 +255,7 @@ gen_kernel_library(
         "f32",
         "f64",
     ],
-    unroll_factors = "4",
+    unroll_factors = "1",
 )
 
 gen_kernel_library(
@@ -260,6 +267,19 @@ gen_kernel_library(
         "i16",
         "i32",
         "i64",
+    ],
+    unroll_factors = "4",
+)
+
+gen_kernel_library(
+    name = "is_inf",
+    generate_ranked = False,
+    generate_unranked = True,
+    tile_size = "256",
+    types = [
+        "f16",
+        "f32",
+        "f64",
     ],
     unroll_factors = "4",
 )
@@ -280,7 +300,7 @@ gen_kernel_library(
         "f32",
         "f64",
     ],
-    unroll_factors = "4",
+    unroll_factors = "1",
 )
 
 gen_kernel_library(
@@ -309,9 +329,30 @@ gen_kernel_library(
         "f64",
         "i64",
     ],
-    unroll_factors = "4",
+    # TODO(b/174543802): Enable once fusion heursitics is better.
+    # unroll_factors = "4",
 )
 
+gen_kernel_library(
+    name = "equal",
+    generate_ranked = False,
+    generate_unranked = True,
+    tile_size = "256,1,1",
+    types = [
+        "f16",
+        "f32",
+        "f64",
+        "i1",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+    ],
+    # TODO(b/174543802): Enable once fusion heursitics is better.
+    # unroll_factors = "4",
+)
+
+# Kernels that support all floating-point types.
 [
     gen_kernel_library(
         name = name,
@@ -326,15 +367,32 @@ gen_kernel_library(
     )
     for name in [
         "ceil",
-        "cos",
         "exp",
         "floor",
         "is_finite",
         "log",
         "neg",
         "rsqrt",
-        "sin",
         "sqrt",
         "tanh",
+    ]
+]
+
+# Kernels that support all floating-point types but cannot be vectorized.
+[
+    gen_kernel_library(
+        name = name,
+        generate_unranked = True,
+        tile_size = "256",
+        types = [
+            "f16",
+            "f32",
+            "f64",
+        ],
+        unroll_factors = "1",
+    )
+    for name in [
+        "cos",
+        "sin",
     ]
 ]

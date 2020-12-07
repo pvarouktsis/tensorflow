@@ -18,13 +18,21 @@ limitations under the License.
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/profiler/protobuf/xplane.pb.h"
+#include "tensorflow/core/profiler/utils/timespan.h"
 #include "tensorflow/core/profiler/utils/trace_utils.h"
 
 namespace tensorflow {
 namespace profiler {
+
+// Returns a Timespan from an XEvent.
+// WARNING: This should only be used when comparing events from the same XLine.
+inline Timespan XEventTimespan(const XEvent& event) {
+  return Timespan(event.offset_ps(), event.duration_ps());
+}
 
 // Returns the plane with the given name or nullptr if not found.
 const XPlane* FindPlaneWithName(const XSpace& space, absl::string_view name);
@@ -40,13 +48,15 @@ std::vector<const XPlane*> FindPlanesWithPrefix(const XSpace& space,
 std::vector<XPlane*> FindMutablePlanesWithPrefix(XSpace* space,
                                                  absl::string_view prefix);
 
-// Returns true if event is nested by parent.
-bool IsNested(const tensorflow::profiler::XEvent& event,
-              const tensorflow::profiler::XEvent& parent);
+// Returns the plane with the given id or nullptr if not found.
+const XLine* FindLineWithId(const XPlane& plane, int64 id);
 
 XStat* FindOrAddMutableStat(const XStatMetadata& stat_metadata, XEvent* event);
 
 void RemovePlane(XSpace* space, const XPlane* plane);
+void RemoveLine(XPlane* plane, const XLine* line);
+void RemoveEvents(XLine* line,
+                  const absl::flat_hash_set<const XEvent*>& events);
 
 void RemoveEmptyPlanes(XSpace* space);
 void RemoveEmptyLines(XPlane* plane);

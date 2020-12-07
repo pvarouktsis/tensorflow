@@ -47,6 +47,8 @@ limitations under the License.
 #include "mlir/Transforms/DialectConversion.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
 #include "mlir/Transforms/Passes.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/hlo/include/mlir-hlo/Dialect/mhlo/IR/chlo_ops.h"
+#include "tensorflow/compiler/mlir/hlo/include/mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
 #include "tensorflow/compiler/mlir/hlo/include/mlir-hlo/Dialect/mhlo/transforms/passes.h"
 #include "tensorflow/compiler/mlir/tensorflow/dialect_registration.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
@@ -68,6 +70,24 @@ using xla::InternalError;
 using xla::StatusOr;
 
 constexpr llvm::StringRef kGpuBinaryAttrName = "gpu.binary";
+
+// TODO(herhut): Remove this once leftover tensor_to_memref are handled in core.
+namespace {
+struct RemoveUnusedTensorToMemrefOperations
+    : public mlir::PassWrapper<RemoveUnusedTensorToMemrefOperations,
+                               mlir::FunctionPass> {
+  void runOnFunction() override {
+    getFunction().walk([](mlir::TensorToMemrefOp op) {
+      // Drop all tensor_to_memref that have no more users. Currently this will
+      // not happen, as tensor_to_memref has a side-effect. See
+      // https://reviews.llvm.org/D91967 for a dicsussion.
+      if (op.memref().getUsers().empty()) {
+        op.erase();
+      }
+    });
+  }
+};
+}  // end anonymous namespace
 
 Status LowerTFtoGPU(mlir::ModuleOp module, bool gpu_binary_only,
                     llvm::ArrayRef<uint32_t> tile_sizes,
@@ -94,8 +114,7 @@ Status LowerTFtoGPU(mlir::ModuleOp module, bool gpu_binary_only,
   // Partial bufferization: Transforms inparticular HLO operation to their
   // corresponding LHLO operations and converts the function signature. Leaves
   // shape operations untouched.
-  pm.addPass(mlir::kernel_gen::transforms::CreateBufferizePass(
-      /*allow_partial_bufferization=*/true));
+  pm.addPass(mlir::kernel_gen::transforms::CreateHloBufferizePass());
   // Run CSE to ensure that loads and stores to the same location get recognized
   // as such.
   pm.addNestedPass<::mlir::FuncOp>(::mlir::createCSEPass());
@@ -167,16 +186,34 @@ Status LowerTFtoGPU(mlir::ModuleOp module, bool gpu_binary_only,
   pm.addNestedPass<mlir::FuncOp>(mlir::createStdExpandOpsPass());
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::kernel_gen::transforms::CreateShapeToDescriptorsPass());
+  // Before bufferizing further, remove unused tensor_to_memref, so that we do
+  // not create allocations for tensor computations that are not actually
+  // needed.
+  pm.addPass(mlir::createCanonicalizerPass());
+  // TODO(herhut) Remove once handled in mlir core.
+  pm.addNestedPass<mlir::FuncOp>(
+      std::make_unique<RemoveUnusedTensorToMemrefOperations>());
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addNestedPass<mlir::FuncOp>(mlir::createCSEPass());
-  pm.addPass(mlir::kernel_gen::transforms::CreateBufferizePass());
+  if (!gpu_binary_only) {
+    // Before inserting more allocs, map the ones we already have to the
+    // tf runtime. That ensures that all allocations for the actual computation
+    // end up on the device, whereas allocations for shape computation and host
+    // side things remain on the host.
+    // Longer term, this should be handled by proper device placement.
+    pm.addPass(mlir::kernel_gen::tf_framework::
+                   CreateEmbedTFFrameworkFunctionAndAllocPass());
+  }
+  pm.addPass(mlir::kernel_gen::transforms::CreateFinalBufferizePass());
   pm.addNestedPass<mlir::FuncOp>(mlir::createPromoteBuffersToStackPass(64));
-  // TODO(herhut): Enabled this to avoid leaks once fixed.
+  // TODO(herhut): Depends on https://bugs.llvm.org/show_bug.cgi?id=48385.
+  // We also cannot properly free temporaries until
+  // https://llvm.discourse.group/t/remove-tight-coupling-of-the-bufferdeallocation-pass-to-std-and-linalg-operations/2162
+  // is resolved.
   // pm.addNestedPass<mlir::FuncOp>(::mlir::createBufferDeallocationPass());
-
   // Apply the mapping and go to GPU. We cannot do this earlier due to missing
   // interfaces on the GPU dialect.
-  // TODO(herhut) Implement interfaces.
+  // TODO(b/174830459): Move up once implemented.
   pm.addNestedPass<::mlir::FuncOp>(mlir::createParallelLoopToGpuPass());
 
   // Some basic cleanup.
@@ -202,12 +239,10 @@ Status LowerTFtoGPU(mlir::ModuleOp module, bool gpu_binary_only,
   // Constraints are removed as late as possible and before lowering to CFG.
   pm.addNestedPass<::mlir::FuncOp>(::mlir::createConvertShapeConstraintsPass());
   pm.addNestedPass<::mlir::FuncOp>(::mlir::createCanonicalizerPass());
-  // TODO(herhut): Remove this pass once the LowerToCFG pass can handle it.
-  pm.addNestedPass<mlir::FuncOp>(
-      mlir::kernel_gen::transforms::CreateParallelLoopsToSequential());
   pm.addPass(::mlir::createLowerToCFGPass());
-  // Map allocs, asserts, etc. to the tensorflow framework.
-  pm.addPass(mlir::kernel_gen::tf_framework::CreateEmbedTFFrameworkPass());
+  // Map asserts to the tensorflow framework.
+  pm.addPass(
+      mlir::kernel_gen::tf_framework::CreateEmbedTFFrameworkAssertPass());
   if (embed_memref_prints) {
     pm.addNestedPass<::mlir::FuncOp>(
         mlir::kernel_gen::transforms::CreateEmbedMemRefPrintsPass());
@@ -235,7 +270,7 @@ Status AmendKernelLLVMIRWithStaticKnowledge(mlir::ModuleOp module) {
 Status GenerateDeviceCode(mlir::ModuleOp module,
                           llvm::StringRef gpu_binary_attr_name,
                           llvm::ArrayRef<std::string> architectures,
-                          bool generate_fatbin) {
+                          bool generate_fatbin, bool print_ptx) {
   mlir::PassManager pm(module.getContext());
   applyTensorflowAndCLOptions(pm);
 
@@ -243,7 +278,7 @@ Status GenerateDeviceCode(mlir::ModuleOp module,
   // Remove debug information to ensure we do not create debug PTX.
   kernel_pm.addPass(mlir::createStripDebugInfoPass());
   kernel_pm.addPass(mlir::kernel_gen::transforms::CreateGpuKernelToBlobPass(
-      gpu_binary_attr_name, architectures, generate_fatbin));
+      gpu_binary_attr_name, architectures, generate_fatbin, print_ptx));
 
   return failed(pm.run(module))
              ? InternalError("Generating device code failed.")
@@ -254,7 +289,8 @@ Status LowerHostSideToFinalForm(mlir::ModuleOp module) {
   mlir::PassManager pm(module.getContext());
   applyTensorflowAndCLOptions(pm);
 
-  pm.addPass(mlir::kernel_gen::transforms::CreateTFKernelToLLVMPass());
+  pm.addPass(mlir::kernel_gen::transforms::CreateTFKernelToLLVMPass(
+      kGpuBinaryAttrName));
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::createCSEPass());
 
@@ -270,8 +306,10 @@ StatusOr<mlir::OwningModuleRef> GenerateKernelForTfCode(
     llvm::ArrayRef<std::string> architectures,
     llvm::ArrayRef<uint32_t> tile_sizes,
     llvm::ArrayRef<uint32_t> unroll_factors, bool embed_memref_prints,
-    bool generate_fatbin) {
-  mlir::RegisterAllTensorFlowDialects(context.getDialectRegistry());
+    bool generate_fatbin, bool print_ptx) {
+  auto& registry = context.getDialectRegistry();
+  mlir::RegisterAllTensorFlowDialects(registry);
+  registry.insert<mlir::chlo::HloClientDialect, mlir::mhlo::MhloDialect>();
   mlir::OwningModuleRef module = mlir::parseSourceString(tf_code, &context);
   TF_RETURN_IF_ERROR(LowerTFtoGPU(module.get(), gpu_binary_only, tile_sizes,
                                   unroll_factors, embed_memref_prints));
@@ -288,7 +326,8 @@ StatusOr<mlir::OwningModuleRef> GenerateKernelForTfCode(
 #endif
   TF_RETURN_IF_ERROR(AmendKernelLLVMIRWithStaticKnowledge(module.get()));
   TF_RETURN_IF_ERROR(GenerateDeviceCode(module.get(), kGpuBinaryAttrName,
-                                        architectures, generate_fatbin));
+                                        architectures, generate_fatbin,
+                                        print_ptx));
   if (!gpu_binary_only) {
     TF_RETURN_IF_ERROR(LowerHostSideToFinalForm(module.get()));
   }

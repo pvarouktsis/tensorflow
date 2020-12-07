@@ -144,12 +144,14 @@ def _find_rocblas_config(rocm_install_path):
     ]
     version_file = None
     for f in possible_version_files:
-      version_file = os.path.join(path, f)
-      if os.path.exists(version_file):
+      version_file_path = os.path.join(path, f)
+      if os.path.exists(version_file_path):
+        version_file = version_file_path
         break
-    if not os.path.exists(version_file):
+    if not version_file:
       raise ConfigError(
-          'rocblas version file "{}" not found'.format(version_file))
+          "rocblas version file not found in {}".format(
+              possible_version_files))
     major = _get_header_version(version_file, "ROCBLAS_VERSION_MAJOR")
     minor = _get_header_version(version_file, "ROCBLAS_VERSION_MINOR")
     patch = _get_header_version(version_file, "ROCBLAS_VERSION_PATCH")

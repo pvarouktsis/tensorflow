@@ -585,6 +585,20 @@ func @shape_of_dynamic_reshape(%arg0: tensor<*xf32>, %shape: tensor<2xindex>) ->
   return %1 : tensor<2xindex>
 }
 
+// CHECK-LABEL: func @dynamic_reshape_of_dynamic_reshape
+// CHECK-SAME: [[ARG0:%[a-zA-Z0-9]+]]
+// CHECK-SAME: [[ARG1:%[a-zA-Z0-9]+]]
+func @dynamic_reshape_of_dynamic_reshape(%arg0: tensor<?xf16>, %shape: tensor<?xindex>) -> tensor<?xf16> {
+  // CHECK: [[RES:%[a-zA-Z0-9]+]] = "mhlo.dynamic_reshape"([[ARG0]], %{{[a-zA-Z0-9]+}}) : (tensor<?xf16>, tensor<1xindex>) -> tensor<?xf16>
+  // CHECK: return [[RES]]
+  %0 = "mhlo.dynamic_reshape"(%arg0, %shape) : (tensor<?xf16>, tensor<?xindex>) -> tensor<*xf16>
+  %1 = shape.shape_of %0 : tensor<*xf16> -> tensor<?xindex>
+  %2 = shape.num_elements %1 : tensor<?xindex> -> index
+  %3 = tensor_from_elements %2 : tensor<1xindex>
+  %4 = "mhlo.dynamic_reshape"(%0, %3) : (tensor<*xf16>, tensor<1xindex>) -> tensor<?xf16>
+  return %4 : tensor<?xf16>
+}
+
 // CHECK-LABEL: do_not_dce_while_with_outfeed
 func @do_not_dce_while_with_outfeed(%arg0: tensor<i64>) -> tensor<i64> {
   // CHECK: mhlo.while
@@ -657,6 +671,14 @@ func @fold_compare_same_lt(%arg0: tensor<i64>) -> tensor<i1> {
 func @fold_compare_same_gt(%arg0: tensor<i64>) -> tensor<i1> {
   // CHECK: %0 = mhlo.constant dense<false> : tensor<i1>
   %0 = "mhlo.compare"(%arg0, %arg0) {comparison_direction = "GT"} : (tensor<i64>, tensor<i64>) -> tensor<i1>
+  return %0 : tensor<i1>
+}
+
+// Address NaN != NaN.
+// CHECK-LABEL: dont_fold_compare_same_eq_float
+func @dont_fold_compare_same_eq_float(%arg0: tensor<f16>) -> tensor<i1> {
+  // CHECK: %0 = "mhlo.compare"(%arg0, %arg0) {comparison_direction = "EQ"} : (tensor<f16>, tensor<f16>) -> tensor<i1>
+  %0 = "mhlo.compare"(%arg0, %arg0) {comparison_direction = "EQ"} : (tensor<f16>, tensor<f16>) -> tensor<i1>
   return %0 : tensor<i1>
 }
 

@@ -66,12 +66,6 @@ void RemoveIf(protobuf::RepeatedPtrField<T>* array, Pred&& pred) {
   array->DeleteSubrange(i, array->size() - i);
 }
 
-// Creates a Timespan from an XEvent.
-// WARNING: This should only be used when comparing events from the same XLine.
-Timespan XEventTimespan(const XEvent& event) {
-  return Timespan(event.offset_ps(), event.duration_ps());
-}
-
 }  // namespace
 
 const XPlane* FindPlaneWithName(const XSpace& space, absl::string_view name) {
@@ -113,8 +107,10 @@ std::vector<XPlane*> FindMutablePlanesWithPrefix(XSpace* space,
   return result;
 }
 
-bool IsNested(const XEvent& event, const XEvent& parent) {
-  return XEventTimespan(parent).Includes(XEventTimespan(event));
+const XLine* FindLineWithId(const XPlane& plane, int64 id) {
+  int i = FindIf(plane.lines(),
+                 [id](const XLine* line) { return line->id() == id; });
+  return (i != -1) ? &plane.lines(i) : nullptr;
 }
 
 XStat* FindOrAddMutableStat(const XStatMetadata& stat_metadata, XEvent* event) {
@@ -131,6 +127,17 @@ XStat* FindOrAddMutableStat(const XStatMetadata& stat_metadata, XEvent* event) {
 void RemovePlane(XSpace* space, const XPlane* plane) {
   DCHECK(plane != nullptr);
   Remove(space->mutable_planes(), plane);
+}
+
+void RemoveLine(XPlane* plane, const XLine* line) {
+  DCHECK(line != nullptr);
+  Remove(plane->mutable_lines(), line);
+}
+
+void RemoveEvents(XLine* line,
+                  const absl::flat_hash_set<const XEvent*>& events) {
+  RemoveIf(line->mutable_events(),
+           [&](const XEvent* event) { return events.contains(event); });
 }
 
 void RemoveEmptyPlanes(XSpace* space) {

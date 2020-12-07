@@ -870,6 +870,7 @@ class Cluster(object):
     self.workers = [
         Worker(i, w, self) for i, w in enumerate(worker_device_strings)
     ]
+    self._strategy = strategy
 
   def _record_and_ignore_transient_ps_failure(self, e):
     """Records potential PS failures and return if failure should be ignored."""
@@ -899,11 +900,13 @@ class Cluster(object):
     Returns:
       A `RemoteValue` object.
     """
+    self._strategy.extended._being_scheduled = True  # pylint: disable=protected-access
     closure = Closure(
         function,
         self._closure_queue._cancellation_mgr,  # pylint: disable=protected-access
         args=args,
         kwargs=kwargs)
+    self._strategy.extended._being_scheduled = False  # pylint: disable=protected-access
     self._closure_queue.put(closure)
     return closure.output_remote_value
 
@@ -990,6 +993,7 @@ class ClusterCoordinator(object):
           "`tf.distribute.experimental.coordinator.ClusterCoordinator` "
           "currently.")
     self._strategy = strategy
+    self._strategy.extended._used_with_coordinator = True
     self.cluster = Cluster(strategy)
 
   @property
@@ -1378,10 +1382,5 @@ def _is_worker_failure(error):
     if ("is neither a type of a primitive operation nor a name of a function "
         "registered" in str(error)):
       return True
-
-  # This could happen when the iterator is no longer valid on the remote worker
-  # "Resource input tensor contains an invalid device"
-  if isinstance(error, errors.CancelledError):
-    return True
 
   return False

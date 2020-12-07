@@ -17,13 +17,13 @@ limitations under the License.
 
 #include "absl/types/any.h"
 #include "tensorflow/lite/delegates/gpu/cl/cl_device.h"
-#include "tensorflow/lite/delegates/gpu/cl/kernels/special/depthwise_conv_plus_1x1_conv.h"
-#include "tensorflow/lite/delegates/gpu/cl/kernels/special/fc_fc_add.h"
 #include "tensorflow/lite/delegates/gpu/common/data_type.h"
 #include "tensorflow/lite/delegates/gpu/common/operations.h"
 #include "tensorflow/lite/delegates/gpu/common/shape.h"
 #include "tensorflow/lite/delegates/gpu/common/status.h"
 #include "tensorflow/lite/delegates/gpu/common/task/tensor_desc.h"
+#include "tensorflow/lite/delegates/gpu/common/tasks/special/depthwise_conv_plus_1x1_conv.h"
+#include "tensorflow/lite/delegates/gpu/common/tasks/special/fc_fc_add.h"
 #include "tensorflow/lite/delegates/gpu/common/tensor.h"
 
 namespace tflite {
@@ -36,6 +36,9 @@ absl::Status TryDepthwiseConvPlus1x1Conv(
     const std::map<ValueId, TensorDescriptor>& tensor_descriptors,
     std::set<NodeId>* consumed_nodes, GPUOperationsSubgraph* gpu_subgraph) {
   auto* dw_node = graph.GetNode(first_node_id);
+  if (dw_node == nullptr) {
+    return absl::NotFoundError("DepthwiseConvPlus1x1Conv not suitable.");
+  }
   if (OperationTypeFromString(dw_node->operation.type) !=
       OperationType::DEPTHWISE_CONVOLUTION) {
     return absl::NotFoundError("DepthwiseConvPlus1x1Conv not suitable.");
@@ -50,6 +53,9 @@ absl::Status TryDepthwiseConvPlus1x1Conv(
     return absl::NotFoundError("DepthwiseConvPlus1x1Conv not suitable.");
   }
   auto* conv_node = consumers[0];
+  if (conv_node == nullptr) {
+    return absl::NotFoundError("DepthwiseConvPlus1x1Conv not suitable.");
+  }
   if (consumed_nodes->find(conv_node->id) != consumed_nodes->end()) {
     return absl::NotFoundError("DepthwiseConvPlus1x1Conv not suitable.");
   }
@@ -94,6 +100,9 @@ absl::Status TryFCFCAdd(
     const std::map<ValueId, TensorDescriptor>& tensor_descriptors,
     std::set<NodeId>* consumed_nodes, GPUOperationsSubgraph* gpu_subgraph) {
   auto* fc0_node = graph.GetNode(first_node_id);
+  if (fc0_node == nullptr) {
+    return absl::NotFoundError("FCFCAdd not suitable.");
+  }
   if (OperationTypeFromString(fc0_node->operation.type) !=
       OperationType::FULLY_CONNECTED) {
     return absl::NotFoundError("FCFCAdd not suitable.");
@@ -108,6 +117,9 @@ absl::Status TryFCFCAdd(
     return absl::NotFoundError("FCFCAdd not suitable.");
   }
   auto* add_node = consumers[0];
+  if (add_node == nullptr) {
+    return absl::NotFoundError("FCFCAdd not suitable.");
+  }
   if (consumed_nodes->find(add_node->id) != consumed_nodes->end()) {
     return absl::NotFoundError("FCFCAdd not suitable.");
   }
@@ -120,6 +132,9 @@ absl::Status TryFCFCAdd(
   }
   auto fc1_output_id = add_inputs[0]->id + add_inputs[1]->id - fc0_output_id;
   auto* fc1_node = graph.FindProducer(fc1_output_id);
+  if (fc1_node == nullptr) {
+    return absl::NotFoundError("FCFCAdd not suitable.");
+  }
   if (OperationTypeFromString(fc1_node->operation.type) !=
       OperationType::FULLY_CONNECTED) {
     return absl::NotFoundError("FCFCAdd not suitable.");
